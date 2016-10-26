@@ -1,18 +1,22 @@
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE BangPatterns #-}
 module Main where
 
-import Graphics.Gloss.Interface.Pure.Game (Event)
+import Data.Monoid
+import Data.Vector (Vector, (!))
+import Graphics.Gloss.Data.Picture hiding (Vector)
+import Graphics.Gloss.Interface.Pure.Game (Event, play, Picture)
 import Graphics.Gloss.Raster.Field
-import Data.Vector as V
+import qualified Data.Vector as V
 
 import Debug.Trace
 
 main :: IO ()
-main = playField display cellSize stepRate initialModel drawModel handleEvents stepModel
+main = playFieldWithPic display cellSize stepRate initialModel drawModel handleEvents stepModel
   where
-    display = InWindow "SIMPLEX MIPLEX!!1!" (512, 512) (0, 0)
+    display = InWindow "SIMPLEX MIPLEX!!1!" (1024, 1000) (0, 0)
     stepRate = 1 -- one a second
-    cellSize = (10,10)
+    cellSize = (2,2)
 
 -- | Calculate cost at (x, y)
 type CostFunction = Double -> Double -> Double
@@ -21,9 +25,12 @@ data Model = Model {
   modelFunction :: !CostFunction
 }
 
+scaleFunc :: Double -> CostFunction -> CostFunction
+scaleFunc v f = \x y -> f (v * x) (v * y)
+
 initialModel :: Model
 initialModel = Model {
-    modelFunction = \x y -> 10 - x**2 - 4*x + y**2 - y - x*y
+    modelFunction = scaleFunc 5 $ \x y -> 10 - x**2 - 4*x + y**2 - y - x*y
   }
 
 -- | Color gradient for heatmap
@@ -64,24 +71,59 @@ pickColorGradient :: Double -- ^ Min value
   -> Double -- ^ Max value
   -> Double -- ^ Function value
   -> Color
-pickColorGradient minv maxv v = traceShow highI $ mixColors di (1-di) lowColor highColor
+pickColorGradient minv maxv v = mixColors di (1-di) highColor lowColor
   where
     n = V.length colorGradient
     nv = (v - minv)/(maxv-minv)
     i = nv * fromIntegral n
-    lowI = 0 `max` floor i
+    clamp = max 0 . min (n-1)
+    lowI = clamp $ floor i
     lowColor = colorGradient ! lowI
-    highI = (n-1) `min` ceiling i
+    highI = clamp $ ceiling i
     highColor = colorGradient ! highI
     di = realToFrac $ i - fromIntegral lowI
 
-drawModel :: Model -> Point -> Color
-drawModel Model{..} (x, y) = pickColorGradient (-10) 10 v
+drawModel :: Model -> (Point -> Color, Picture)
+drawModel Model{..} = (makeBackground, circle 80)
   where
-    v = modelFunction (realToFrac x) (realToFrac y)
+    makeBackground (x, y) = pickColorGradient (-50) 50 $ modelFunction (realToFrac x) (realToFrac y)
 
 handleEvents :: Event -> Model -> Model
 handleEvents _ m = m
 
 stepModel :: Float -> Model -> Model
 stepModel _ m = m
+
+-- HA-HA-HA my fork of the 'playField' function
+-- | Play a game with a continous 2D function.
+playFieldWithPic
+  :: Display                   -- ^ Display mode.
+  -> (Int, Int)                -- ^ Number of pixels to draw per point.
+  -> Int                       -- ^ Number of simulation steps to take
+                               --   for each second of real time
+  -> world                     -- ^ The initial world.
+  -> (world -> (Point -> Color, Picture)) -- ^ Function to compute the color of the world at the given point.
+  -> (Event -> world -> world) -- ^ Function to handle input events.
+  -> (Float -> world -> world) -- ^ Function to step the world one iteration.
+                               --   It is passed the time in seconds since the program started.
+  -> IO ()
+playFieldWithPic !display (!zoomX, !zoomY) !stepRate !initWorld !drawWorld !handleEvent !stepWorld =
+  if zoomX < 1 || zoomY < 1
+  then error $ "Graphics.Gloss.Raster.Field: invalid pixel scale factor " ++ show (zoomX, zoomY)
+  else let
+       (!winSizeX, !winSizeY) = sizeOfDisplay display
+    in play display black stepRate
+            initWorld
+            (\ !world -> let
+              (makePixel, pic) = drawWorld world
+              in makePicture winSizeX winSizeY zoomX zoomY makePixel <> pic)
+            handleEvent
+            stepWorld
+{-# INLINE playFieldWithPic #-}
+
+sizeOfDisplay :: Display -> (Int, Int)
+sizeOfDisplay display
+ = case display of
+        InWindow _ s _  -> s
+        FullScreen s    -> s
+{-# INLINE sizeOfDisplay #-}
