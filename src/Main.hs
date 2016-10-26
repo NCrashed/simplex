@@ -8,8 +8,10 @@ import Graphics.Gloss.Data.Picture hiding (Vector)
 import Graphics.Gloss.Interface.Pure.Game (Event, play, Picture)
 import Graphics.Gloss.Raster.Field
 import qualified Data.Vector as V
+import Data.Default.Class
+import System.IO.Unsafe (unsafePerformIO)
 
-import Debug.Trace
+import Optimise (Simplex(..), getSimplexPoints, FminOpts (..), initSimplex, stepSearch)
 
 main :: IO ()
 main = playFieldWithPic display cellSize stepRate initialModel drawModel handleEvents stepModel
@@ -23,6 +25,7 @@ type CostFunction = Double -> Double -> Double
 
 data Model = Model {
   modelFunction :: !CostFunction
+, modelSimplex :: !Simplex
 }
 
 scaleFunc :: Double -> CostFunction -> CostFunction
@@ -30,8 +33,15 @@ scaleFunc v f = \x y -> f (v * x) (v * y)
 
 initialModel :: Model
 initialModel = Model {
-    modelFunction = scaleFunc 5 $ \x y -> 10 - x**2 - 4*x + y**2 - y - x*y
-  }
+    modelFunction = costFunc
+  , modelSimplex = let
+      FminOpts {..} = def
+      ps = unsafePerformIO $ getSimplexPoints 50 [10, 10]
+      s = Simplex ps costFunc' [] oAlpha oBetha oGamma oError (([],0),([],0),([],0)) []
+      in initSimplex s
+  } where
+    costFunc = scaleFunc 5 $ \x y -> 10 - x**2 - 4*x + y**2 - y - x*y
+    costFunc' [x, y] = costFunc x y
 
 -- | Color gradient for heatmap
 colorGradient :: Vector Color
@@ -84,7 +94,7 @@ pickColorGradient minv maxv v = mixColors di (1-di) highColor lowColor
     di = realToFrac $ i - fromIntegral lowI
 
 drawModel :: Model -> (Point -> Color, Picture)
-drawModel Model{..} = (makeBackground, circle 80)
+drawModel Model{..} = (makeBackground, drawSimplex modelSimplex)
   where
     makeBackground (x, y) = pickColorGradient (-50) 50 $ modelFunction (realToFrac x) (realToFrac y)
 
@@ -92,7 +102,10 @@ handleEvents :: Event -> Model -> Model
 handleEvents _ m = m
 
 stepModel :: Float -> Model -> Model
-stepModel _ m = m
+stepModel _ m = m { modelSimplex = stepSearch $ modelSimplex m }
+
+drawSimplex :: Simplex -> Picture
+drawSimplex Simplex{..} = lineLoop $ fmap (\[x, y] -> (realToFrac x, realToFrac y)) sPoints
 
 -- HA-HA-HA my fork of the 'playField' function
 -- | Play a game with a continous 2D function.
