@@ -37,10 +37,15 @@ resolver: lts-7.5
 # will not be run. This is useful for tweaking upstream packages.
 packages:
 - '.'
+- location:
+    git: git@github.com:LeMarwin/bmt16.git
+    commit: 25ba6717c03135b253960cf90b6b10ee5a9d097b
+
 # Dependency packages to be pulled from upstream that are not in the resolver
 # (e.g., acme-missiles-0.3)
 extra-deps:
 - gloss-raster-1.10.2.3
+- hmatrix-repa-0.1.2.2
 
 # Override default flag values for local packages and extra-deps
 flags: {}
